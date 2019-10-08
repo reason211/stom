@@ -1,6 +1,7 @@
 package generate
 
 import (
+	"io"
 	"database/sql"
 	"fmt"
 	"log"
@@ -8,139 +9,11 @@ import (
 	p "path"
 	"stom/cmd"
 	"strings"
-
 	"stom/utils"
-
-	"github.com/beego/bee/logger/colors"
 	_ "github.com/go-sql-driver/mysql"
 )
 
-// Table represent a table in a database
-type Table struct {
-	Name          string
-	Pk            string
-	Uk            []string
-	Fk            map[string]*ForeignKey
-	Columns       []*Column
-	ImportTimePkg bool
-}
-
-// Column reprsents a column for a table
-type Column struct {
-	Name string
-	Type string
-	Tag  *OrmTag
-}
-
-// ForeignKey represents a foreign key column for a table
-type ForeignKey struct {
-	Name      string
-	RefSchema string
-	RefTable  string
-	RefColumn string
-}
-
-// OrmTag contains Beego ORM tag information for a column
-type OrmTag struct {
-	Auto        bool
-	Pk          bool
-	Null        bool
-	Index       bool
-	Unique      bool
-	Column      string
-	Size        string
-	Decimals    string
-	Digits      string
-	AutoNow     bool
-	AutoNowAdd  bool
-	Type        string
-	Default     string
-	RelOne      bool
-	ReverseOne  bool
-	RelFk       bool
-	ReverseMany bool
-	RelM2M      bool
-	Comment     string //column comment
-}
-
-// String returns the source code string for the Table struct
-func (tb *Table) String() string {
-	rv := fmt.Sprintf("type %s struct {\n", utils.CamelCase(tb.Name))
-	for _, v := range tb.Columns {
-		rv += v.String() + "\n"
-	}
-	rv += "}\n"
-	return rv
-}
-
-// String returns the source code string of a field in Table struct
-// It maps to a column in database table. e.g. Id int `orm:"column(id);auto"`
-func (col *Column) String() string {
-	return fmt.Sprintf("%s %s %s", col.Name, col.Type, col.Tag.String())
-}
-
-// String returns the ORM tag string for a column
-func (tag *OrmTag) String() string {
-	var ormOptions []string
-	if tag.Column != "" {
-		ormOptions = append(ormOptions, fmt.Sprintf("column(%s)", tag.Column))
-	}
-	if tag.Auto {
-		ormOptions = append(ormOptions, "auto")
-	}
-	if tag.Size != "" {
-		ormOptions = append(ormOptions, fmt.Sprintf("size(%s)", tag.Size))
-	}
-	if tag.Type != "" {
-		ormOptions = append(ormOptions, fmt.Sprintf("type(%s)", tag.Type))
-	}
-	if tag.Null {
-		ormOptions = append(ormOptions, "null")
-	}
-	if tag.AutoNow {
-		ormOptions = append(ormOptions, "auto_now")
-	}
-	if tag.AutoNowAdd {
-		ormOptions = append(ormOptions, "auto_now_add")
-	}
-	if tag.Decimals != "" {
-		ormOptions = append(ormOptions, fmt.Sprintf("digits(%s);decimals(%s)", tag.Digits, tag.Decimals))
-	}
-	if tag.RelFk {
-		ormOptions = append(ormOptions, "rel(fk)")
-	}
-	if tag.RelOne {
-		ormOptions = append(ormOptions, "rel(one)")
-	}
-	if tag.ReverseOne {
-		ormOptions = append(ormOptions, "reverse(one)")
-	}
-	if tag.ReverseMany {
-		ormOptions = append(ormOptions, "reverse(many)")
-	}
-	if tag.RelM2M {
-		ormOptions = append(ormOptions, "rel(m2m)")
-	}
-	if tag.Pk {
-		ormOptions = append(ormOptions, "pk")
-	}
-	if tag.Unique {
-		ormOptions = append(ormOptions, "unique")
-	}
-	if tag.Default != "" {
-		ormOptions = append(ormOptions, fmt.Sprintf("default(%s)", tag.Default))
-	}
-
-	if len(ormOptions) == 0 {
-		return ""
-	}
-	if tag.Comment != "" {
-		return fmt.Sprintf("`orm:\"%s\" description:\"%s\"`", strings.Join(ormOptions, ";"), tag.Comment)
-	}
-	return fmt.Sprintf("`orm:\"%s\"`", strings.Join(ormOptions, ";"))
-}
-
-func GenerateCode() error {
+func Generate() error {
 	var selectedTables map[string]bool
 	tables := cmd.Tables
 	if tables != "" {
@@ -149,7 +22,7 @@ func GenerateCode() error {
 			selectedTables[v] = true
 		}
 	}
-	if err := genModel(cmd.SQLConn, selectedTables); err != nil {
+	if err := genModel(cmd.ConnStr, selectedTables); err != nil {
 		return err
 	}
 	return nil
@@ -158,7 +31,7 @@ func GenerateCode() error {
 func genModel(connStr string, selectedTableNames map[string]bool) error {
 	db, err := sql.Open("mysql", connStr)
 	if err != nil {
-		log.Fatalf("Could not connect to database using '%s': %s", connStr, err)
+		log.Fatalf("Can not connect to database using '%s': %s", connStr, err)
 	}
 	defer db.Close()
 	var tablesNames []string
@@ -169,12 +42,12 @@ func genModel(connStr string, selectedTableNames map[string]bool) error {
 	} else {
 		tablesNames = GetTableNames(db)
 	}
-	tables := getTableObjects(tablesNames, db)
+	tables := GetTableObjects(tablesNames, db)
 	dbName := GetDatabaseName(connStr)
 	writeModelFiles(tables, dbName)
 	return nil
 }
-
+// GetDatabaseName returns database name
 func GetDatabaseName(connStr string) string {
 	return p.Base(connStr)
 }
@@ -183,20 +56,20 @@ func GetDatabaseName(connStr string) string {
 func GetTableNames(db *sql.DB) (tables []string) {
 	rows, err := db.Query("SHOW TABLES")
 	if err != nil {
-		log.Fatalf("Could not show tables: %s", err)
+		log.Fatalf("Could query tables: %s", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
-			log.Fatalf("Could not show tables: %s", err)
+			log.Fatalf("Could query tables: %s", err)
 		}
 		tables = append(tables, name)
 	}
 	return
 }
 
-// writeModelFiles generates model files
+// writeModelFiles generate files
 func writeModelFiles(tables []*Table, dbname string) {
 	mpath, _ := os.Getwd()
 	mpath = p.Join(dbname)
@@ -206,30 +79,21 @@ func writeModelFiles(tables []*Table, dbname string) {
 		log.Printf("%s", err)
 	}
 
-	w := colors.NewColorWriter(os.Stdout)
+	w := io.Writer(os.Stdout)
 	for _, tb := range tables {
 		filename := strings.Replace(tb.Name, dbname+"_", "", 1)
 		filename = utils.CamelCase(filename + "_model")
 		fpath := p.Join(mpath, filename+".go")
 		var f *os.File
 		if utils.IsExist(fpath) {
-			// log.Printf("'%s' already exists. Do you want to overwrite it? [Yes|No] ", fpath)
-			// if utils.AskForConfirmation() {
-			// 	f, err = os.OpenFile(fpath, os.O_RDWR|os.O_TRUNC, 0666)
-			// 	if err != nil {
-			// 		log.Printf("%s", err)
-			// 		continue
-			// 	}
-			// } else {
-			// 	log.Printf("Skipped create file '%s'", fpath)
-			// 	continue
-			// }
+			//revert wd
 			f, err = os.OpenFile(fpath, os.O_RDWR|os.O_TRUNC, 0666)
 			if err != nil {
 				log.Printf("%s", err)
 				continue
 			}
 		} else {
+			//creat & wd
 			f, err = os.OpenFile(fpath, os.O_CREATE|os.O_RDWR, 0666)
 			if err != nil {
 				log.Printf("%s", err)
@@ -250,24 +114,20 @@ func writeModelFiles(tables []*Table, dbname string) {
 		if _, err := f.WriteString(fileStr); err != nil {
 			log.Fatalf("Could not write model file to '%s': %s", fpath, err)
 		}
-		utils.CloseFile(f)
+		defer f.Close()
 		fmt.Fprintf(w, "\t%s%screate%s\t %s%s\n", "\x1b[32m", "\x1b[1m", "\x1b[21m", fpath, "\x1b[0m")
 		utils.FormatSourceCode(fpath)
 	}
 }
 
-// getTableObjects process each table name
-func getTableObjects(tableNames []string, db *sql.DB) (tables []*Table) {
-	// if a table has a composite pk or doesn't have pk, we can't use it yet
-	// these tables will be put into blacklist so that other struct will not
-	// reference it.
+// GetTableObjects process each table name
+func GetTableObjects(tableNames []string, db *sql.DB) (tables []*Table) {
 	blackList := make(map[string]bool)
 	// process constraints information for each table, also gather blacklisted table names
 	for _, tableName := range tableNames {
 		// create a table struct
 		tb := new(Table)
 		tb.Name = tableName
-		tb.Fk = make(map[string]*ForeignKey)
 		GetConstraints(db, tb, blackList)
 		tables = append(tables, tb)
 	}
@@ -279,7 +139,6 @@ func getTableObjects(tableNames []string, db *sql.DB) (tables []*Table) {
 }
 
 // GetConstraints gets primary key, unique key and foreign keys of a table from
-// information_schema and fill in the Table struct
 func GetConstraints(db *sql.DB, table *Table, blackList map[string]bool) {
 	rows, err := db.Query(
 		`SELECT
@@ -299,9 +158,8 @@ func GetConstraints(db *sql.DB, table *Table, blackList map[string]bool) {
 		if err := rows.Scan(&constraintTypeBytes, &columnNameBytes, &refTableSchemaBytes, &refTableNameBytes, &refColumnNameBytes, &refOrdinalPosBytes); err != nil {
 			log.Fatal("Could not read INFORMATION_SCHEMA for PK/UK/FK information")
 		}
-		constraintType, columnName, refTableSchema, refTableName, refColumnName, refOrdinalPos :=
-			string(constraintTypeBytes), string(columnNameBytes), string(refTableSchemaBytes),
-			string(refTableNameBytes), string(refColumnNameBytes), string(refOrdinalPosBytes)
+		constraintType, columnName, refOrdinalPos :=
+			string(constraintTypeBytes), string(columnNameBytes), string(refOrdinalPosBytes)
 		if constraintType == "PRIMARY KEY" {
 			if refOrdinalPos == "1" {
 				table.Pk = columnName
@@ -311,21 +169,11 @@ func GetConstraints(db *sql.DB, table *Table, blackList map[string]bool) {
 				// registering blacklisted tables
 				blackList[table.Name] = true
 			}
-		} else if constraintType == "UNIQUE" {
-			table.Uk = append(table.Uk, columnName)
-		} else if constraintType == "FOREIGN KEY" {
-			fk := new(ForeignKey)
-			fk.Name = columnName
-			fk.RefSchema = refTableSchema
-			fk.RefTable = refTableName
-			fk.RefColumn = refColumnName
-			table.Fk[columnName] = fk
 		}
 	}
 }
 
-// GetColumns retrieves columns details from
-// information_schema and fill in the Column struct
+// GetColumns retrieves columns details from  information_schema and fill in the Column struct
 func GetColumns(db *sql.DB, table *Table, blackList map[string]bool) {
 	// retrieve columns
 	colDefRows, err := db.Query(
@@ -369,31 +217,3 @@ func GetColumns(db *sql.DB, table *Table, blackList map[string]bool) {
 	}
 }
 
-const (
-	ModelTPL = `package models
-import (
-	"github.com/astaxie/beego/orm"
-)
-
-{{modelStruct}}
-
-func init() {
-	orm.RegisterModel(new({{tableName}}))
-}
-
-`
-
-	ModelPrefixTPL = `package models
-
-import (
-	"github.com/astaxie/beego/orm"
-)
-
-{{modelStruct}}
-
-func init() {
-	orm.RegisterModelWithPrefix("{{dbName}}", new({{tableName}}))
-}
-
-`
-)

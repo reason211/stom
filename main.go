@@ -14,10 +14,9 @@ func main() {
 	flag.Parse()
 	// println(wd)
 
-	if  cmd.SQLConn == "" {
+	if  cmd.ConnStr == "" {
 		cmd.Usage()
 		os.Exit(0)
 	}
-
-	generate.GenerateCode();
+	generate.Generate();
 }
