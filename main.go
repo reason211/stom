@@ -4,19 +4,20 @@ import (
 	"flag"
 	// "fmt"
 	"stom/generate"
+	"stom/cmd"
 
 	// "log"
-	// "os"
+	"os"
 )
 
 func main() {
 	flag.Parse()
 	// println(wd)
 
-	// if len(flag.Args()) < 1 {
-	// 	// cmd.Usage()
-	// 	os.Exit(0)
-	// }
+	if  cmd.SQLConn == "" {
+		cmd.Usage()
+		os.Exit(0)
+	}
 
 	generate.GenerateCode();
 }
