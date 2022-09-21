@@ -1,15 +1,16 @@
 package generate
 
 import (
-	"io"
 	"database/sql"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	p "path"
 	"stom/cmd"
-	"strings"
 	"stom/utils"
+	"strings"
+
 	_ "github.com/go-sql-driver/mysql"
 )
 
@@ -47,6 +48,7 @@ func genModel(connStr string, selectedTableNames map[string]bool) error {
 	writeModelFiles(tables, dbName)
 	return nil
 }
+
 // GetDatabaseName returns database name
 func GetDatabaseName(connStr string) string {
 	return p.Base(connStr)
@@ -202,6 +204,9 @@ func GetColumns(db *sql.DB, table *Table, blackList map[string]bool) {
 		col := new(Column)
 		col.Name = utils.CamelCase(colName)
 		col.Type = "string"
+		if strings.Contains(string(dataTypeBytes), "int") {
+			col.Type = "int"
+		}
 
 		// Tag info
 		tag := new(OrmTag)
@@ -216,4 +221,3 @@ func GetColumns(db *sql.DB, table *Table, blackList map[string]bool) {
 		table.Columns = append(table.Columns, col)
 	}
 }
-
