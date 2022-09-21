@@ -211,7 +211,7 @@ func GetColumns(db *sql.DB, table *Table, blackList map[string]bool) {
 		// Tag info
 		tag := new(OrmTag)
 		if table.Pk == colName || colName == "id" {
-			col.Type = "string"
+			// col.Type = "string"
 			tag.Pk = true
 		}
 		tag.Column = colName
